@@ -1,0 +1,70 @@
+name: DevOps Task API CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  ci-test-and-coverage:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: devuser
+          POSTGRES_PASSWORD: rahasia123
+          POSTGRES_DB: task_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout kode repositori
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Pasang dependensi
+        run: npm ci
+
+      - name: Siapkan tabel tasks di PostgreSQL
+        env:
+          PGPASSWORD: rahasia123
+        run: |
+          psql -h 127.0.0.1 -U devuser -d task_db -c "
+          CREATE TABLE IF NOT EXISTS tasks (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            is_done BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );"
+
+      - name: Jalankan unit test dan coverage
+        env:
+          APP_PORT: 3000
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_USER: devuser
+          DB_PASSWORD: rahasia123
+          DB_NAME: task_db
+        run: npm run test:coverage
+
+  cd-docker-build:
+    needs: ci-test-and-coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout kode repositori
+        uses: actions/checkout@v4
+
+      - name: Build Docker image untuk verifikasi rilis
+        run: docker build -t task-api:ci-${{ github.sha }} .
